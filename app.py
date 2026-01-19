@@ -221,12 +221,89 @@ def scrape_with_metadata(item):
         "scraped_content": content[:3000]
     }
 
+def is_valid_listing_url(url):
+    """
+    Aggressively filter out category and search result pages.
+    
+    The "Digit Rule": A valid listing URL MUST contain:
+    - A listing ID pattern (hyphen followed by numbers, e.g., -400483)
+    - OR a street number at the start of the slug (e.g., /235-clearview-road)
+    
+    Returns:
+        bool: True if URL appears to be a specific property listing
+    """
+    url_lower = url.lower()
+    
+    # EXPANDED BLOCKLIST - Explicitly ban these patterns
+    blocklist_patterns = [
+        "/region/",
+        "/town/",
+        "/label/",
+        "/agencies/",
+        "/agency/",
+        "/state/",
+        "/search",
+        "/browse/",
+        "/category/",
+        "/suburb/",
+        "-rural-property-search",
+        "-property-search",
+        "-real-estate",
+        "-for-sale",
+        "?page=",
+        "?ac=",
+        "page=",
+        "/sold/",
+        "/auctions/",
+        "/news/",
+        "/blog/",
+        "/guide/",
+        "/about/",
+        "/contact/",
+        "/team/",
+    ]
+    
+    # Check blocklist first - reject if any pattern matches
+    for pattern in blocklist_patterns:
+        if pattern in url_lower:
+            return False
+    
+    # THE DIGIT RULE: URL must have a listing identifier
+    # Pattern 1: Listing ID at end of URL (e.g., -400483 or -12345)
+    has_listing_id_at_end = bool(re.search(r'-\d+/?$', url_lower))
+    
+    # Pattern 2: Listing ID in the URL path (e.g., /400483- or /-12345-)
+    has_listing_id_in_path = bool(re.search(r'/\d+-', url_lower))
+    
+    # Pattern 3: Street number at start of slug (e.g., /235-clearview or /12-main-street)
+    # This matches paths like /235-clearview-road-town
+    has_street_number = bool(re.search(r'/\d{1,5}-[a-z]', url_lower))
+    
+    # Pattern 4: Property ID in path (common format: /property/12345)
+    has_property_id = bool(re.search(r'/property/\d+', url_lower))
+    
+    # Pattern 5: Listing with lot number (e.g., /lot-5-some-road)
+    has_lot_number = bool(re.search(r'/lot-\d+', url_lower))
+    
+    # URL must match at least ONE of these patterns to be considered valid
+    is_valid = (
+        has_listing_id_at_end or 
+        has_listing_id_in_path or 
+        has_street_number or 
+        has_property_id or
+        has_lot_number
+    )
+    
+    return is_valid
+
+
 def get_land_listings(location_name, api_key):
     """
-    Search for listings with expanded results and parallel scraping.
+    Search for listings with expanded results, aggressive URL filtering, and parallel scraping.
     
     Features:
     - Fetches up to 30 results per source ("Wide Net")
+    - AGGRESSIVE URL FILTERING: Uses "Digit Rule" to filter out category pages
     - Pre-filters obvious non-listings (guides, reports, etc.)
     - Parallel scraping with ThreadPoolExecutor
     
@@ -239,11 +316,12 @@ def get_land_listings(location_name, api_key):
         'Content-Type': 'application/json'
     }
     
-    # Simpler, broader queries to get more results
+    # Refined queries to prioritize specific listings
+    # Using "price" and inurl:- to encourage listing pages with IDs
     sites = [
-        ("Farmbuy", f'site:farmbuy.com {location_name} land for sale'),
-        ("Elders", f'site:eldersrealestate.com.au {location_name} rural'),
-        ("RealEstate.com.au", f'site:realestate.com.au {location_name} rural land'),
+        ("Farmbuy", f'site:farmbuy.com {location_name} "price" inurl:-'),
+        ("Elders", f'site:eldersrealestate.com.au {location_name} rural "price"'),
+        ("RealEstate.com.au", f'site:realestate.com.au {location_name} rural land "price"'),
     ]
     
     # Collect all candidate items from search
@@ -259,24 +337,37 @@ def get_land_listings(location_name, api_key):
             if 'organic' in data:
                 for item in data['organic']:
                     title = item.get('title', '')
+                    item_url = item.get('link', '')
                     
-                    # Light pre-filter: only skip obvious non-listings
-                    if is_valid_listing_title(title):
+                    # AGGRESSIVE FILTERING: Check both title AND URL
+                    if is_valid_listing_title(title) and is_valid_listing_url(item_url):
                         candidates.append(item)
                         
         except Exception as e:
             # Silently continue - don't block entire search
             pass
     
-    # If no candidates after filtering, try without filter
+    # If no candidates after strict filtering, retry with relaxed URL filter
+    # but still apply blocklist
     if not candidates:
         for source, query in sites:
-            payload = json.dumps({"q": query, "num": 20})
+            # Use simpler query as fallback
+            fallback_query = query.replace('"price" inurl:-', 'land for sale').replace('"price"', 'land')
+            payload = json.dumps({"q": fallback_query, "num": 20})
             try:
                 response = requests.post(url, headers=headers, data=payload, timeout=15)
                 data = response.json()
                 if 'organic' in data:
-                    candidates.extend(data['organic'][:10])
+                    for item in data['organic'][:15]:
+                        item_url = item.get('link', '')
+                        # Still apply blocklist even in fallback
+                        url_lower = item_url.lower()
+                        is_blocked = any(p in url_lower for p in [
+                            "/agencies/", "/agency/", "/state/", "/region/", 
+                            "-property-search", "/search", "?page=", "?ac="
+                        ])
+                        if not is_blocked:
+                            candidates.append(item)
             except:
                 pass
     
