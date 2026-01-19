@@ -1,0 +1,14 @@
+# Ignore virtual environment
+venv/
+
+# Ignore secrets (CRITICAL)
+.streamlit/secrets.toml
+
+# Ignore python cache
+__pycache__/
+*.pyc
+
+# Ignore local database/cache
+.cache.sqlite
+
+.git

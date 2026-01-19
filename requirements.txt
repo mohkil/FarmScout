@@ -1,0 +1,12 @@
+streamlit
+streamlit-folium
+folium
+google-generativeai
+openmeteo-requests
+requests-cache
+retry-requests
+requests
+pandas
+numpy
+playwright
+beautifulsoup4
