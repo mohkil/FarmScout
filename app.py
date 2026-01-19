@@ -673,36 +673,33 @@ if location_selected:
     norm_lon = (clicked_lon + 180) % 360 - 180
     current_address = get_address_from_coords(clicked_lat, norm_lon)
 
-# Sidebar Controls
-with st.sidebar:
-    st.header("📍 Location")
+# Controls below map
+analyze_btn = False  # Default when no location selected
+if not location_selected:
+    st.info("📍 Click a point on the map to select a location for analysis.")
+else:
+    # Show location info and analyze button in a clean layout
+    loc_col1, loc_col2, loc_col3, loc_col4 = st.columns([2, 1, 1, 1])
     
-    # Instruction text
-    st.info("📍 Click a point on the map, then click 'Analyze Location' below.")
+    with loc_col1:
+        if current_address:
+            st.success(f"📍 **{current_address}**")
+        else:
+            st.success(f"📍 Location selected")
     
-    # Show address if location selected
-    if location_selected and current_address:
-        st.success(f"**{current_address}**")
-    elif not location_selected:
-        st.warning("No location selected")
-    
-    # Coordinates - show "---" if no location selected
-    if location_selected:
+    with loc_col2:
         st.metric("Latitude", f"{clicked_lat:.4f}")
+    
+    with loc_col3:
         st.metric("Longitude", f"{clicked_lon:.4f}")
-    else:
-        st.metric("Latitude", "---")
-        st.metric("Longitude", "---")
     
-    st.divider()
-    
-    # Analyze button - disabled if no location selected OR analysis in progress
-    analyze_btn = st.button(
-        "🔍 Analyze Location" if not is_analyzing else "⏳ Analyzing...", 
-        type="primary", 
-        use_container_width=True,
-        disabled=(not location_selected) or is_analyzing
-    )
+    with loc_col4:
+        analyze_btn = st.button(
+            "🔍 Analyze Location" if not is_analyzing else "⏳ Analyzing...", 
+            type="primary", 
+            use_container_width=True,
+            disabled=is_analyzing
+        )
 
 # Initialize Session State
 if "analysis_done" not in st.session_state:
